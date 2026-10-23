@@ -167,26 +167,108 @@
     }
   }
 
-  async function findPlaces(origin, maxMi, signal) {
-    const key = `emd:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
-    const cached = safeStorage((s) => s.getItem(key));
-    if (cached) { try { return JSON.parse(cached); } catch { /* ignore */ } }
-
+  async function overpassSearch(origin, maxMi, signal) {
     const rings = RINGS_MI.filter((r) => r < maxMi).concat(maxMi);
     let elements = [], searched = 0;
     for (const mi of rings) {
-      setLoading(true, `Sniffing out spots within ${mi} mi…`);
       try {
         elements = await overpass(overpassQuery(origin.lat, origin.lon, mi * METERS_PER_MILE), signal);
       } catch (e) {
-        // A wider ring failed but we already have nearby spots — show those.
-        if (elements.length && !signal?.aborted) break;
+        // A wider ring failed but we already have nearby spots — use those.
+        if (elements.length && !signal.aborted) break;
         throw e;
       }
       searched = mi;
       if (elements.length >= ENOUGH_PLACES) break;
     }
-    const result = { elements, searched };
+    return { elements, searched, source: "overpass" };
+  }
+
+  /*
+   * Backup source: Nominatim's category search ("restaurant", "fast food")
+   * inside map boxes. Max 50 results per box and 1 request/second, so we
+   * search a tight box around you first, then four quadrants further out.
+   */
+  const sleep = (ms, signal) => new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(t); reject(new Error("Search cancelled.")); }, { once: true });
+  });
+
+  function nominatimToElement(r) {
+    const a = r.address || {};
+    const tags = { ...(r.extratags || {}), name: r.name, [r.category]: r.type };
+    if (a.house_number) tags["addr:housenumber"] = a.house_number;
+    if (a.road) tags["addr:street"] = a.road;
+    const city = a.city || a.town || a.village || a.suburb;
+    if (city) tags["addr:city"] = city;
+    return { type: r.osm_type, id: r.osm_id, lat: +r.lat, lon: +r.lon, tags };
+  }
+
+  async function nominatimSearch(origin, maxMi, signal) {
+    const box = (cLat, cLon, halfMi) => {
+      const dLat = halfMi / 69, dLon = halfMi / (69 * Math.cos(origin.lat * Math.PI / 180));
+      return [cLon - dLon, cLat + dLat, cLon + dLon, cLat - dLat].map((n) => n.toFixed(5)).join(",");
+    };
+    const quadrants = (halfMi) => {
+      const h = halfMi / 2, dLat = h / 69, dLon = h / (69 * Math.cos(origin.lat * Math.PI / 180));
+      return [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([y, x]) => box(origin.lat + y * dLat, origin.lon + x * dLon, h));
+    };
+    const plan = [{ boxes: [box(origin.lat, origin.lon, Math.min(3, maxMi))], mi: Math.min(3, maxMi) }];
+    if (maxMi > 3) plan.push({ boxes: quadrants(Math.min(10, maxMi)), mi: Math.min(10, maxMi) });
+    if (maxMi > 10) plan.push({ boxes: quadrants(maxMi), mi: maxMi, onlyIfFew: true });
+
+    const found = new Map();
+    let searched = 0, requests = 0;
+    for (const step of plan) {
+      if (step.onlyIfFew && found.size >= 120) break;
+      for (const vb of step.boxes) {
+        for (const q of ["restaurant", "fast food"]) {
+          if (requests++) await sleep(1100, signal);
+          const url = `${NOMINATIM}/search?format=jsonv2&limit=50&bounded=1&extratags=1&addressdetails=1`
+            + `&q=${encodeURIComponent(q)}&viewbox=${vb}`;
+          try {
+            const rows = await fetchWithTimeout(url, { signal, headers: { "Accept-Language": "en" } }, 15000);
+            for (const r of rows) if (r.name) found.set(`${r.osm_type}/${r.osm_id}`, nominatimToElement(r));
+          } catch (e) {
+            if (signal.aborted) throw new Error("Search cancelled.");
+            if (!found.size && step === plan[0]) throw e;
+          }
+        }
+      }
+      searched = step.mi;
+    }
+    if (!found.size) throw new Error("No restaurants found nearby.");
+    return { elements: [...found.values()], searched, source: "nominatim" };
+  }
+
+  // Run both sources at once. Overpass has better coverage, so prefer it, but
+  // if the backup finishes first only wait a few more seconds for Overpass.
+  async function findPlaces(origin, maxMi, signal) {
+    const key = `emd2:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
+    const cached = safeStorage((s) => s.getItem(key));
+    if (cached) { try { return JSON.parse(cached); } catch { /* ignore */ } }
+
+    setLoading(true, `Sniffing out spots within ${maxMi} mi…`);
+    const ctrl = new AbortController();
+    const onCancel = () => ctrl.abort();
+    signal.addEventListener("abort", onCancel, { once: true });
+    const ov = overpassSearch(origin, maxMi, ctrl.signal);
+    const nm = nominatimSearch(origin, maxMi, ctrl.signal);
+    ov.catch(() => {}); nm.catch(() => {});
+    let result;
+    try {
+      result = await Promise.any([ov, nm]);
+      if (result.source === "nominatim") {
+        setLoading(true, "Double-checking for more spots…");
+        result = await Promise.race([ov, sleep(4000, ctrl.signal).then(() => result)]).catch(() => result);
+      }
+    } catch {
+      if (signal.aborted) throw new Error("Search cancelled.");
+      throw new Error("The free restaurant map servers aren't answering right now. Wait a minute and try again, or try a smaller distance.");
+    } finally {
+      ctrl.abort();
+      signal.removeEventListener("abort", onCancel);
+    }
     safeStorage((s) => s.setItem(key, JSON.stringify(result)));
     return result;
   }

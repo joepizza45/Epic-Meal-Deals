@@ -440,6 +440,9 @@ const CHAINS = [
     { name: "Swedish meatballs plate", price: [6, 8], fill: 4, deal: "Cheap & surprisingly good" },
     { name: "Hot dog", price: [1, 1.5], fill: 2 },
   ]},
+  { match: /california pizza kitchen|\bcpk\b/i, name: "California Pizza Kitchen", emoji: "🍕", value: 45, meals: [
+    { name: "Hand-tossed pizza", price: [17, 22], fill: 4 },
+  ]},
   { match: /panera/i, name: "Panera Bread", emoji: "🥖", value: 52, meals: [{ name: "You Pick Two", price: [11, 14], fill: 4 }] },
   { match: /noodles & company|noodles and company/i, name: "Noodles & Company", emoji: "🍜", value: 62, meals: [{ name: "Regular noodle bowl", price: [9, 12], fill: 4 }] },
   { match: /jollibee/i, name: "Jollibee", emoji: "🍗", value: 82, meals: [{ name: "Chickenjoy 2pc w/ rice", price: [8, 11], fill: 5 }] },
