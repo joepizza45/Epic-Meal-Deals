@@ -7,10 +7,14 @@
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   ];
+  // Start a backup server if the previous one hasn't answered after this long.
+  const MIRROR_STAGGER_MS = 4000;
+  const OVERPASS_TIMEOUT_MS = 25000;
   // Search outward in rings so dense cities return the *closest* spots
   // instead of an arbitrary slice of a 30-mile circle.
-  const RINGS_MI = [3, 8, 15, 30];
+  const RINGS_MI = [5, 15, 30];
   const ENOUGH_PLACES = 200;
   const PAGE_SIZE = 25;
   const METERS_PER_MILE = 1609.344;
@@ -23,6 +27,7 @@
     results: $("results"), status: $("status"), rail: $("meal-rail"),
     list: $("spot-list"), chips: $("cuisine-chips"), sort: $("sort"), localOnly: $("local-only"),
     more: $("more-btn"), loading: $("loading"), loadingMsg: $("loading-msg"),
+    loadingTime: $("loading-time"), cancel: $("cancel-btn"),
   };
 
   const state = {
@@ -66,6 +71,11 @@
   async function fetchWithTimeout(url, opts = {}, ms = 30000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
+    const outer = opts.signal;
+    if (outer) {
+      if (outer.aborted) ctrl.abort();
+      outer.addEventListener("abort", () => ctrl.abort(), { once: true });
+    }
     try {
       const res = await fetch(url, { ...opts, signal: ctrl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -75,10 +85,22 @@
     }
   }
 
+  let loadingTimer = null, loadingStart = 0;
   function setLoading(on, msg) {
     els.loading.hidden = !on;
     els.go.disabled = on;
     if (msg) els.loadingMsg.textContent = msg;
+    if (on && !loadingTimer) {
+      loadingStart = Date.now();
+      els.loadingTime.textContent = "";
+      loadingTimer = setInterval(() => {
+        const secs = Math.round((Date.now() - loadingStart) / 1000);
+        els.loadingTime.textContent = secs >= 5 ? `${secs}s — busy servers, hang tight…` : "";
+      }, 1000);
+    } else if (!on) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
   }
 
   /* ---------- geocoding ---------- */
@@ -104,31 +126,48 @@
 
   function overpassQuery(lat, lon, meters) {
     const around = `(around:${Math.round(meters)},${lat},${lon})`;
-    return `[out:json][timeout:25];(
-      nwr["amenity"~"^(restaurant|fast_food|food_court)$"]["name"]${around};
-      nwr["shop"="wholesale"]["name"~"Costco",i]${around};
-      nwr["shop"="furniture"]["name"~"IKEA",i]${around};
+    // Nodes + ways only (relations are rare for restaurants and slow to search).
+    return `[out:json][timeout:20];(
+      nw["amenity"~"^(restaurant|fast_food|food_court)$"]["name"]${around};
+      nw["shop"="wholesale"]["brand"="Costco"]${around};
+      nw["shop"="furniture"]["brand"="IKEA"]${around};
     );out center tags;`;
   }
 
-  async function overpass(query) {
-    let lastErr;
-    for (const url of OVERPASS_MIRRORS) {
-      try {
-        const data = await fetchWithTimeout(url, {
+  // Ask the main server first; if it's slow, race backup servers too and
+  // take whichever answers first.
+  async function overpass(query, signal) {
+    const race = new AbortController();
+    const onCancel = () => race.abort();
+    signal?.addEventListener("abort", onCancel, { once: true });
+    const attempts = OVERPASS_MIRRORS.map((url, i) => new Promise((resolve, reject) => {
+      const start = () => {
+        if (race.signal.aborted) return reject(new Error("cancelled"));
+        fetchWithTimeout(url, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: "data=" + encodeURIComponent(query),
-        }, 35000);
-        return data.elements || [];
-      } catch (e) {
-        lastErr = e;
-      }
+          signal: race.signal,
+        }, OVERPASS_TIMEOUT_MS).then((data) => {
+          // Overpass reports server-side timeouts as a 200 with a "remark".
+          if (data.remark && !(data.elements || []).length) throw new Error(data.remark);
+          resolve(data.elements || []);
+        }).catch(reject);
+      };
+      setTimeout(start, i * MIRROR_STAGGER_MS);
+    }));
+    try {
+      return await Promise.any(attempts);
+    } catch {
+      if (signal?.aborted) throw new Error("Search cancelled.");
+      throw new Error("The free restaurant map servers are swamped right now. Wait a few seconds and try again, or try a smaller distance.");
+    } finally {
+      race.abort();
+      signal?.removeEventListener("abort", onCancel);
     }
-    throw new Error("The restaurant map servers are busy right now. Give it a few seconds and try again. (" + (lastErr?.message || "network error") + ")");
   }
 
-  async function findPlaces(origin, maxMi) {
+  async function findPlaces(origin, maxMi, signal) {
     const key = `emd:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
     const cached = safeStorage((s) => s.getItem(key));
     if (cached) { try { return JSON.parse(cached); } catch { /* ignore */ } }
@@ -137,7 +176,13 @@
     let elements = [], searched = 0;
     for (const mi of rings) {
       setLoading(true, `Sniffing out spots within ${mi} mi…`);
-      elements = await overpass(overpassQuery(origin.lat, origin.lon, mi * METERS_PER_MILE));
+      try {
+        elements = await overpass(overpassQuery(origin.lat, origin.lon, mi * METERS_PER_MILE), signal);
+      } catch (e) {
+        // A wider ring failed but we already have nearby spots — show those.
+        if (elements.length && !signal?.aborted) break;
+        throw e;
+      }
       searched = mi;
       if (elements.length >= ENOUGH_PLACES) break;
     }
@@ -409,7 +454,12 @@
     history.replaceState(null, "", `${location.pathname}?${params}`);
   }
 
+  let searchCtrl = null;
+
   async function runSearch(originOverride) {
+    searchCtrl?.abort();
+    searchCtrl = new AbortController();
+    const signal = searchCtrl.signal;
     const budget = readBudget();
     const radiusMi = +els.radius.value;
     els.orderNo.textContent = String(Math.floor(Math.random() * 900) + 100);
@@ -417,7 +467,7 @@
     try {
       const origin = originOverride || await geocode(els.location.value.trim());
       state.origin = origin;
-      const { elements, searched } = await findPlaces(origin, radiusMi);
+      const { elements, searched } = await findPlaces(origin, radiusMi, signal);
       setLoading(true, "Crunching the numbers on every combo…");
 
       const byKey = new Map();
@@ -464,6 +514,8 @@
       alert("We couldn't get your location. Type your city or ZIP instead.");
     }, { timeout: 15000, maximumAge: 600000 });
   });
+
+  els.cancel.addEventListener("click", () => { searchCtrl?.abort(); setLoading(false); });
 
   els.radius.addEventListener("input", () => { els.radiusOut.textContent = els.radius.value; });
 
