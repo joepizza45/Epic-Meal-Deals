@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Epic Meal Deals</title>
+  <meta name="description" content="Find the best bang-for-your-buck places to eat within 30 miles, and the best meals for your budget.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Shrikhand&family=Rubik:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="tablecloth" aria-hidden="true"></div>
+
+  <header class="hero">
+    <div class="floaters" aria-hidden="true">
+      <span>🍔</span><span>🌮</span><span>🍕</span><span>🍜</span><span>🥙</span><span>🍗</span><span>🌭</span><span>🥞</span>
+    </div>
+    <p class="eyebrow">Big plates · small prices</p>
+    <h1 class="logo">Epic Meal Deals</h1>
+    <p class="tagline">The most food for your money, within 30 miles of you.</p>
+
+    <form id="search" class="ticket" autocomplete="off">
+      <div class="ticket-head">
+        <span>ORDER #<span id="order-no">001</span></span>
+        <span>TABLE: YOU</span>
+      </div>
+
+      <label class="field">
+        <span class="field-label">📍 Where are you?</span>
+        <div class="loc-row">
+          <input id="location" type="text" placeholder="City, address, or ZIP — e.g. Austin, TX" required>
+          <button type="button" id="geo-btn" class="btn btn-ghost" title="Use my current location">🎯 Near me</button>
+        </div>
+      </label>
+
+      <div class="field">
+        <span class="field-label">💵 Price per meal</span>
+        <div class="chips" id="price-presets">
+          <button type="button" class="chip" data-min="0" data-max="8">Cheap eats · under $8</button>
+          <button type="button" class="chip is-on" data-min="0" data-max="15">Everyday · under $15</button>
+          <button type="button" class="chip" data-min="10" data-max="25">Treat yourself · $10–25</button>
+        </div>
+        <div class="price-row">
+          <label>Min $<input id="price-min" type="number" min="0" max="200" step="1" value="0" inputmode="numeric"></label>
+          <span class="dash">to</span>
+          <label>Max $<input id="price-max" type="number" min="1" max="200" step="1" value="15" inputmode="numeric"></label>
+        </div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">🚗 How far will you go? <strong><span id="radius-out">30</span> mi</strong></span>
+        <input id="radius" type="range" min="1" max="30" step="1" value="30">
+      </label>
+
+      <button type="submit" class="btn btn-big" id="go-btn">Find my feast 🍽️</button>
+      <p class="tip" id="day-tip"></p>
+    </form>
+  </header>
+
+  <main id="results" hidden>
+    <section class="status-bar" id="status"></section>
+
+    <section class="best-meals">
+      <h2 class="section-title">🏆 Best meals for your budget</h2>
+      <p class="section-sub">The most food per dollar near you, in your price range.</p>
+      <div class="meal-rail" id="meal-rail"></div>
+    </section>
+
+    <section class="spots">
+      <div class="spots-head">
+        <h2 class="section-title">🍴 Bang-for-buck spots</h2>
+        <div class="controls">
+          <label>Sort
+            <select id="sort">
+              <option value="score">Best value</option>
+              <option value="distance">Closest</option>
+              <option value="price">Cheapest meal</option>
+            </select>
+          </label>
+          <label class="toggle"><input type="checkbox" id="local-only"> Local spots only</label>
+        </div>
+      </div>
+      <div class="chips cuisine-chips" id="cuisine-chips"></div>
+
+      <div class="spots-layout">
+        <div id="map" aria-label="Map of results"></div>
+        <ol class="spot-list" id="spot-list"></ol>
+      </div>
+      <button class="btn btn-ghost more-btn" id="more-btn" hidden>Show more spots</button>
+    </section>
+  </main>
+
+  <div id="loading" class="loading" hidden>
+    <div class="plate"><span class="spinner">🍕</span></div>
+    <p id="loading-msg">Preheating the oven…</p>
+  </div>
+
+  <footer class="footer">
+    <p><strong>Heads up:</strong> prices are typical estimates for each kind of place and well-known chain deals — not live menus. Always check the menu before you go.</p>
+    <p>Restaurant data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Made with 🧀 by Epic Meal Deals.</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
