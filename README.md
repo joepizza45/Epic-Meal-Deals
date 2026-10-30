@@ -2,6 +2,8 @@
 
 **Find the best bang-for-your-buck places to eat near you.**
 
+🌐 **Live site: https://epicmealdeals.netlify.app/**
+
 Type in your city, address, or ZIP (or tap **🎯 Near me**), set how much you want to spend per meal, and Epic Meal Deals shows you:
 
 - 🏆 **Best meals for your budget** – the most food per dollar near you, in your price range.
@@ -42,6 +44,14 @@ score = 45% × place value      (how good this kind of place or chain usually is
 - **Place value** comes from a hand-built food knowledge base in [`js/data.js`](js/data.js) that covers about 30 cuisine types and more than 45 chains known for deals (Costco food court, Little Caesars, Taco Bell, Waffle House, In-N-Out, and others).
 - A place only shows up if at least one of its typical meals fits your price range.
 
+## 🚫 Closed restaurants
+
+Restaurant data comes from OpenStreetMap, which volunteers keep up to date, so a closed place can linger. To keep results fresh:
+
+- Places OpenStreetMap marks as closed (`disused`, `abandoned`, `opening_hours=closed`, a past `end_date`, or "closed" in the name) are left out.
+- Places nobody has updated in 5+ years get a **⚠️ Not confirmed since…** badge and rank lower.
+- Tap **🚫 Closed?** on a spot to hide it on your device. The site then links to the place on OpenStreetMap so you can add a note, and mappers will fix it for everyone.
+
 ## ⚠️ Prices are estimates
 
 Restaurant locations are real (from OpenStreetMap). **Menu prices are not live.** They're typical US prices for that kind of place or that chain's well-known deals, and they vary by location and change over time. Check the menu (each spot links to reviews, photos, and its website) before you go.
@@ -57,7 +67,11 @@ python3 -m http.server 8000
 
 (Opening `index.html` directly also mostly works, but some browsers block location access on `file://` pages.)
 
-## 🌍 Put it online (free) with GitHub Pages
+## 🌍 Hosting
+
+The live site is hosted on [Netlify](https://www.netlify.com/), connected to this repo, so every push to `main` redeploys automatically within a minute.
+
+### Or use GitHub Pages (free)
 
 1. Push this repo to GitHub.
 2. Go to **Settings → Pages**.

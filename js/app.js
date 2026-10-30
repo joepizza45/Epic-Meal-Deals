@@ -33,7 +33,8 @@
 
   const state = {
     origin: null,      // { lat, lon, label }
-    places: [],        // scored places with in-budget meals
+    allPlaces: [],     // every scored place with in-budget meals
+    places: [],        // allPlaces minus the ones you marked closed
     searchedMi: 0,
     cuisine: "all",
     shown: PAGE_SIZE,
@@ -132,7 +133,7 @@
       nw["amenity"~"^(restaurant|fast_food|food_court|bar|pub)$"]["name"]${around};
       nw["shop"="wholesale"]["brand"="Costco"]${around};
       nw["shop"="furniture"]["brand"="IKEA"]${around};
-    );out center tags;`;
+    );out center meta;`;
   }
 
   // Ask the main server first; if it's slow, race backup servers too and
@@ -245,7 +246,7 @@
   // Run both sources at once. Overpass has better coverage, so prefer it, but
   // if the backup finishes first only wait a few more seconds for Overpass.
   async function findPlaces(origin, maxMi, signal) {
-    const key = `emd3:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
+    const key = `emd4:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
     const cached = safeStorage((s) => s.getItem(key));
     if (cached) { try { return JSON.parse(cached); } catch { /* ignore */ } }
 
@@ -346,6 +347,38 @@
     return null;
   }
 
+  /* ---------- closed & stale listings ---------- */
+
+  const STALE_YEARS = 5;
+
+  // OpenStreetMap sometimes keeps a closed place but marks it in its tags.
+  function looksClosed(tags) {
+    if (["yes", "true"].includes(tags.disused) || ["yes", "true"].includes(tags.abandoned)) return true;
+    if (/^(closed|off)$/i.test((tags.opening_hours || "").trim())) return true;
+    if (/\(closed\)|permanently closed|[-–:]\s*closed\s*$/i.test(tags.name || "")) return true;
+    const end = tags.end_date || tags["end_date:amenity"];
+    if (end && /^\d{4}/.test(end) && new Date(end) <= new Date()) return true;
+    return false;
+  }
+
+  // The most recent year anyone confirmed or edited this place (null if unknown).
+  function lastConfirmedYear(tags, el) {
+    const years = [tags.check_date, tags["check_date:opening_hours"], tags["survey:date"], el.timestamp]
+      .map((d) => { const m = /^(\d{4})/.exec(d || ""); return m ? +m[1] : null; })
+      .filter(Boolean);
+    return years.length ? Math.max(...years) : null;
+  }
+
+  /* Spots you marked "Closed?" stay hidden on this device. */
+  const HIDDEN_KEY = "emd:hidden";
+  function loadHidden() {
+    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")); } catch { return new Set(); }
+  }
+  function saveHidden(set) {
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
+  }
+  const hidden = loadHidden();
+
   /* ---------- classification & scoring ---------- */
 
   function chainFor(tags) {
@@ -380,6 +413,8 @@
     const distance = haversineMi(origin, { lat, lon });
     if (distance > radiusMi) return null;
 
+    if (looksClosed(tags)) return null;
+
     // Costco/IKEA came in as stores; only keep them via their chain entry.
     const chain = chainFor(tags);
     if (tags.shop && !chain) return null;
@@ -396,8 +431,10 @@
     const isLocal = !chain && !tags.brand;
     const gem = isLocal && profile.value >= 80;
     const proximity = 1 - distance / Math.max(radiusMi, 1);
+    const confirmed = lastConfirmedYear(tags, el);
+    const stale = confirmed !== null && new Date().getFullYear() - confirmed >= STALE_YEARS;
     const score = Math.round(
-      0.45 * source.value + 0.4 * meals[0].value + 0.15 * proximity * 100 + (gem ? 3 : 0));
+      0.45 * source.value + 0.4 * meals[0].value + 0.15 * proximity * 100 + (gem ? 3 : 0) - (stale ? 10 : 0));
 
     const addr = [[tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" "), tags["addr:city"]]
       .filter(Boolean).join(", ");
@@ -418,6 +455,8 @@
       happyHour: happyHourFor(tags, chain),
       deals: chain ? (chain.deals || []) : (CUISINE_DEALS[profileKey] || []),
       dealsKnown: !!chain,
+      confirmed, stale,
+      osmUrl: `https://www.openstreetmap.org/${el.type}/${el.id}`,
     };
   }
 
@@ -439,6 +478,9 @@
 
   function renderStatus() {
     const n = state.places.length;
+    const nHidden = state.allPlaces.length - n;
+    const hiddenNote = nHidden
+      ? ` <button type="button" class="link-btn" id="unhide-btn">Show ${nHidden} spot${nHidden > 1 ? "s" : ""} you marked closed</button>` : "";
     const ringNote = state.searchedMi < +els.radius.value
       ? ` (lots of food nearby — showing the closest spots out to <strong>${state.searchedMi} mi</strong>)`
       : ` within <strong>${state.searchedMi} mi</strong>`;
@@ -446,6 +488,7 @@
     els.status.innerHTML = n
       ? `Found <strong>${n}</strong> spots with meals in your <strong>${money(+els.min.value)}–${money(+els.max.value)}</strong> range near <strong>${esc(state.origin.label)}</strong>${ringNote}.`
       : `No spots with meals in that range near <strong>${esc(state.origin.label)}</strong>. Try raising your max price or widening the distance.`;
+    els.status.innerHTML += hiddenNote;
   }
 
   function renderRail() {
@@ -521,6 +564,7 @@
       return `<li><span>${esc(m.name)}</span><span class="dots"></span><span class="p">${priceText(m)}${per}</span></li>`;
     }).join("");
     const badges = [
+      p.stale ? `<span class="badge stale" title="Nobody has updated this listing in a while">⚠️ Not confirmed since ${p.confirmed} — call ahead</span>` : "",
       p.gem ? `<span class="badge gem">⭐ Local gem</span>` : "",
       p.chain ? `<span class="badge chain">Known deals</span>` : "",
       p.takeaway ? `<span class="badge">Takeout</span>` : "",
@@ -537,6 +581,7 @@
       p.menu ? `<a href="${esc(p.menu)}" target="_blank" rel="noopener">📜 Menu</a>` : "",
       p.website ? `<a href="${esc(p.website)}" target="_blank" rel="noopener">🌐 Website</a>` : "",
       p.phone ? `<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">📞 Call</a>` : "",
+      `<button type="button" class="link-btn closed-btn" data-close="${esc(p.id)}">🚫 Closed?</button>`,
     ].join("");
     return `<li class="spot" id="spot-${esc(p.id.replace("/", "-"))}" data-id="${esc(p.id)}">
       <div class="spot-emoji" aria-hidden="true">${p.emoji}</div>
@@ -664,7 +709,8 @@
         const k = p.name.toLowerCase() + "|" + p.lat.toFixed(3) + "|" + p.lon.toFixed(3);
         if (!byKey.has(k)) byKey.set(k, p);
       }
-      state.places = [...byKey.values()];
+      state.allPlaces = [...byKey.values()];
+      state.places = state.allPlaces.filter((p) => !hidden.has(p.id));
       state.searchedMi = searched;
       state.cuisine = "all";
       state.shown = PAGE_SIZE;
@@ -735,7 +781,31 @@
   });
   els.more.addEventListener("click", () => { state.shown += PAGE_SIZE; renderList(); });
 
-  els.list.addEventListener("click", (e) => { const b = e.target.closest("[data-fly]"); if (b) highlight(b.dataset.fly); });
+  els.list.addEventListener("click", (e) => {
+    const fly = e.target.closest("[data-fly]");
+    if (fly) return highlight(fly.dataset.fly);
+    const close = e.target.closest("[data-close]");
+    if (close) markClosed(close.dataset.close);
+  });
+
+  function markClosed(id) {
+    const p = state.places.find((x) => x.id === id);
+    if (!p) return;
+    hidden.add(id); saveHidden(hidden);
+    state.places = state.places.filter((x) => x.id !== id);
+    renderAll();
+    els.status.insertAdjacentHTML("beforeend", `<div class="status-note">🚫 Hid <strong>${esc(p.name)}</strong> on this device.
+      Help everyone else: <a href="${esc(p.osmUrl)}" target="_blank" rel="noopener">open it on OpenStreetMap</a> and tap <em>Add a note</em> to say it closed.</div>`);
+    els.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  els.status.addEventListener("click", (e) => {
+    if (!e.target.closest("#unhide-btn")) return;
+    for (const p of state.allPlaces) hidden.delete(p.id);
+    saveHidden(hidden);
+    state.places = [...state.allPlaces];
+    renderAll();
+  });
   els.rail.addEventListener("click", (e) => {
     const b = e.target.closest(".meal-card");
     if (!b) return;

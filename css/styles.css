@@ -406,6 +406,16 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
   border: 1.5px solid var(--char);
   background: #fff;
 }
+.badge.stale { background: #fff1d6; border-color: #b26a00; color: #7a4800; }
+.link-btn {
+  font: inherit; font-weight: 700; color: var(--ketchup);
+  background: none; border: 0; padding: 0; cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+.status-bar .link-btn { color: var(--mustard); text-decoration: underline; margin-left: 4px; }
+.status-note { margin-top: 8px; font-size: 14px; }
+.status-note a { color: var(--mustard); }
+.closed-btn { color: var(--char-soft); }
 .badge.gem { background: var(--lettuce); color: #fff; border-color: var(--lettuce); }
 .badge.chain { background: var(--mustard-soft); }
 
