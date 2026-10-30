@@ -296,6 +296,47 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
   align-self: flex-start;
 }
 
+/* Happy hour */
+.happy-hour { margin-top: 26px; }
+.hh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+}
+.hh-card {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--paper);
+  border: 2px solid var(--char);
+  border-left: 10px solid var(--mustard);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+}
+.hh-card:hover { transform: translateY(-2px); }
+.hh-card.is-now { border-left-color: var(--lettuce); }
+.hh-when { font-weight: 800; font-size: 14px; color: var(--ketchup-dark); }
+.hh-card.is-now .hh-when { color: var(--lettuce); }
+.hh-name { font-weight: 800; font-size: 17px; line-height: 1.25; }
+.hh-what { font-size: 15px; }
+.hh-foot { font-size: 12px; color: var(--char-soft); margin-top: 2px; }
+
+.badge.hh { background: var(--mustard); }
+.badge.hh.is-now { background: var(--lettuce); color: #fff; border-color: var(--lettuce); }
+
+.spot-deals {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  background: var(--mustard-soft);
+  border-radius: 10px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.spot-deals small { color: var(--char-soft); }
+
 /* Spots */
 .spots { margin-top: 26px; }
 .spots-head {
@@ -483,10 +524,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
 @media (max-width: 520px) {
   .ticket { padding-left: 16px; padding-right: 16px; }
   .loc-row { flex-direction: column; }
-  .spot { grid-template-columns: auto 1fr; }
+  .spot { grid-template-columns: auto minmax(0, 1fr); }
+  .spot-emoji { grid-row: auto; width: 46px; height: 46px; font-size: 26px; }
+  .spot-title { align-self: center; }
   .meter { grid-row: auto; grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; text-align: left; }
   .meter-bar { flex: 1; margin-top: 0; }
-  .spot-emoji { grid-row: span 2; }
+  .spot-info { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

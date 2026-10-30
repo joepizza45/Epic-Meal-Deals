@@ -23,6 +23,7 @@ No sign-up and no API keys. It's a static website (plain HTML, CSS, and JavaScri
 | 🍴 Ranked spots | Sort by best value, closest, or cheapest meal; filter by cuisine; show only local (non-chain) spots |
 | ⭐ Local gems | Independent spots in high-value cuisines (taquerias, phở, halal, pupuserías, and more) get a boost |
 | 👨‍👩‍👧 Feeds a crew | Family meals and whole pizzas show the per-person price |
+| 🍻 Happy hour & deals | Happy hours near you, with the ones happening right now first, plus each spot's deals. Uses happy hours restaurants list on OpenStreetMap, typical happy hours for well-known chains, and common deals for each kind of place |
 | 🔗 Shareable links | Every search updates the URL (`?q=Austin, TX&min=0&max=15&r=30`) so you can send it to a friend |
 | 📅 Daily deal tip | A different deal tip for each day of the week (Taco Tuesday, anyone?) |
 
