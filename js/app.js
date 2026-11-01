@@ -28,11 +28,13 @@
     list: $("spot-list"), chips: $("cuisine-chips"), sort: $("sort"), localOnly: $("local-only"),
     more: $("more-btn"), loading: $("loading"), loadingMsg: $("loading-msg"),
     loadingTime: $("loading-time"), cancel: $("cancel-btn"),
+    hhList: $("hh-list"), hhMore: $("hh-more"), hhOnly: $("hh-only"),
   };
 
   const state = {
     origin: null,      // { lat, lon, label }
-    places: [],        // scored places with in-budget meals
+    allPlaces: [],     // every scored place with in-budget meals
+    places: [],        // allPlaces minus the ones you marked closed
     searchedMi: 0,
     cuisine: "all",
     shown: PAGE_SIZE,
@@ -128,10 +130,10 @@
     const around = `(around:${Math.round(meters)},${lat},${lon})`;
     // Nodes + ways only (relations are rare for restaurants and slow to search).
     return `[out:json][timeout:20];(
-      nw["amenity"~"^(restaurant|fast_food|food_court)$"]["name"]${around};
+      nw["amenity"~"^(restaurant|fast_food|food_court|bar|pub)$"]["name"]${around};
       nw["shop"="wholesale"]["brand"="Costco"]${around};
       nw["shop"="furniture"]["brand"="IKEA"]${around};
-    );out center tags;`;
+    );out center meta;`;
   }
 
   // Ask the main server first; if it's slow, race backup servers too and
@@ -213,7 +215,7 @@
       const h = halfMi / 2, dLat = h / 69, dLon = h / (69 * Math.cos(origin.lat * Math.PI / 180));
       return [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([y, x]) => box(origin.lat + y * dLat, origin.lon + x * dLon, h));
     };
-    const plan = [{ boxes: [box(origin.lat, origin.lon, Math.min(3, maxMi))], mi: Math.min(3, maxMi) }];
+    const plan = [{ boxes: [box(origin.lat, origin.lon, Math.min(3, maxMi))], mi: Math.min(3, maxMi), extra: ["bar", "pub"] }];
     if (maxMi > 3) plan.push({ boxes: quadrants(Math.min(10, maxMi)), mi: Math.min(10, maxMi) });
     if (maxMi > 10) plan.push({ boxes: quadrants(maxMi), mi: maxMi, onlyIfFew: true });
 
@@ -222,7 +224,7 @@
     for (const step of plan) {
       if (step.onlyIfFew && found.size >= 120) break;
       for (const vb of step.boxes) {
-        for (const q of ["restaurant", "fast food"]) {
+        for (const q of ["restaurant", "fast food", ...(step.extra || [])]) {
           if (requests++) await sleep(1100, signal);
           const url = `${NOMINATIM}/search?format=jsonv2&limit=50&bounded=1&extratags=1&addressdetails=1`
             + `&q=${encodeURIComponent(q)}&viewbox=${vb}`;
@@ -244,7 +246,7 @@
   // Run both sources at once. Overpass has better coverage, so prefer it, but
   // if the backup finishes first only wait a few more seconds for Overpass.
   async function findPlaces(origin, maxMi, signal) {
-    const key = `emd2:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
+    const key = `emd4:${origin.lat.toFixed(3)},${origin.lon.toFixed(3)},${maxMi}`;
     const cached = safeStorage((s) => s.getItem(key));
     if (cached) { try { return JSON.parse(cached); } catch { /* ignore */ } }
 
@@ -273,6 +275,110 @@
     return result;
   }
 
+  /* ---------- happy hours ---------- */
+
+  const DAY_CODES = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+
+  // Parses simple opening_hours-style text, e.g. "Mo-Fr 15:00-18:00; Sa 12:00-14:00".
+  // Returns null for anything fancier so we just show the raw text.
+  function parseHours(text) {
+    const rules = [];
+    // Holiday rules ("PH off") don't change the weekly schedule, so skip them.
+    for (const part of String(text).split(";").map((x) => x.trim()).filter((x) => x && !/^PH\b/.test(x))) {
+      const m = part.match(/^((?:[A-Z][a-z](?:-[A-Z][a-z])?,?)+)?\s*((?:\d{1,2}:\d{2}-\d{1,2}:\d{2},?)+)$/);
+      if (!m) return null;
+      const days = new Set();
+      if (!m[1]) for (let d = 0; d < 7; d++) days.add(d);
+      else for (const span of m[1].split(",").filter(Boolean)) {
+        const [a, b] = span.split("-").map((d) => DAY_CODES.indexOf(d));
+        if (a < 0 || (b !== undefined && b < 0)) return null;
+        for (let d = a; ; d = (d + 1) % 7) { days.add(d); if (b === undefined || d === b) break; }
+      }
+      const ranges = m[2].split(",").filter(Boolean).map((r) => r.split("-").map(toMin));
+      rules.push({ days, ranges });
+    }
+    return rules.length ? rules : null;
+  }
+
+  function fmtTime(min) {
+    const h = Math.floor(min / 60) % 24, m = min % 60;
+    const ampm = h < 12 ? "am" : "pm";
+    if (h === 0 && m === 0) return "midnight";
+    return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""}${ampm}`;
+  }
+
+  function fmtDays(days) {
+    if (days.size === 7) return "Daily";
+    const list = [1, 2, 3, 4, 5, 6, 0].filter((d) => days.has(d));
+    if (list.join() === "1,2,3,4,5") return "Weekdays";
+    if (list.join() === "6,0") return "Weekends";
+    const isRun = list.length > 2 && list.every((d, i) => i === 0 || d === (list[i - 1] + 1) % 7);
+    return isRun ? `${DAY_NAMES[list[0]]}–${DAY_NAMES[list.at(-1)]}` : list.map((d) => DAY_NAMES[d]).join(", ");
+  }
+
+  function describeHours(rules) {
+    return rules.map((r) => `${fmtDays(r.days)} ${r.ranges.map(([a, b]) => `${fmtTime(a)}–${fmtTime(b)}`).join(", ")}`).join(" · ");
+  }
+
+  // "now" | "soon" (later today) | "later" (another day) | "unknown"
+  function happyHourStatus(hh, now = new Date()) {
+    if (!hh.rules) return { state: "unknown", label: hh.when };
+    const day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
+    let soonest = null;
+    for (const r of hh.rules) {
+      if (!r.days.has(day)) continue;
+      for (const [a, b0] of r.ranges) {
+        const b = b0 <= a ? b0 + 1440 : b0; // runs past midnight
+        if (mins >= a && mins < b) return { state: "now", label: `Happening now · until ${fmtTime(b)}` };
+        if (a > mins && (soonest === null || a < soonest[0])) soonest = [a, b];
+      }
+    }
+    if (soonest) return { state: "soon", label: `Today ${fmtTime(soonest[0])}–${fmtTime(soonest[1])}` };
+    return { state: "later", label: describeHours(hh.rules) };
+  }
+
+  function happyHourFor(tags, chain) {
+    if (tags.happy_hours) {
+      return { when: tags.happy_hours, what: tags["happy_hours:description"] || "Happy hour specials", rules: parseHours(tags.happy_hours), listed: true };
+    }
+    if (chain?.happyHour) return { ...chain.happyHour, rules: parseHours(chain.happyHour.when), listed: false };
+    return null;
+  }
+
+  /* ---------- closed & stale listings ---------- */
+
+  const STALE_YEARS = 5;
+
+  // OpenStreetMap sometimes keeps a closed place but marks it in its tags.
+  function looksClosed(tags) {
+    if (["yes", "true"].includes(tags.disused) || ["yes", "true"].includes(tags.abandoned)) return true;
+    if (/^(closed|off)$/i.test((tags.opening_hours || "").trim())) return true;
+    if (/\(closed\)|permanently closed|[-–:]\s*closed\s*$/i.test(tags.name || "")) return true;
+    const end = tags.end_date || tags["end_date:amenity"];
+    if (end && /^\d{4}/.test(end) && new Date(end) <= new Date()) return true;
+    return false;
+  }
+
+  // The most recent year anyone confirmed or edited this place (null if unknown).
+  function lastConfirmedYear(tags, el) {
+    const years = [tags.check_date, tags["check_date:opening_hours"], tags["survey:date"], el.timestamp]
+      .map((d) => { const m = /^(\d{4})/.exec(d || ""); return m ? +m[1] : null; })
+      .filter(Boolean);
+    return years.length ? Math.max(...years) : null;
+  }
+
+  /* Spots you marked "Closed?" stay hidden on this device. */
+  const HIDDEN_KEY = "emd:hidden";
+  function loadHidden() {
+    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")); } catch { return new Set(); }
+  }
+  function saveHidden(set) {
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
+  }
+  const hidden = loadHidden();
+
   /* ---------- classification & scoring ---------- */
 
   function chainFor(tags) {
@@ -282,6 +388,7 @@
 
   function profileKeyFor(tags) {
     if (tags.amenity === "food_court") return "food_court";
+    if (tags.amenity === "bar" || tags.amenity === "pub") return "bar";
     const cuisines = (tags.cuisine || "").toLowerCase().split(/[;,]/).map((s) => s.trim().replace(/\s+/g, "_"));
     for (const c of cuisines) if (CUISINE_MAP[c]) return CUISINE_MAP[c];
     for (const [re, key] of NAME_KEYWORDS) if (re.test(tags.name || "")) return key;
@@ -306,6 +413,8 @@
     const distance = haversineMi(origin, { lat, lon });
     if (distance > radiusMi) return null;
 
+    if (looksClosed(tags)) return null;
+
     // Costco/IKEA came in as stores; only keep them via their chain entry.
     const chain = chainFor(tags);
     if (tags.shop && !chain) return null;
@@ -322,8 +431,10 @@
     const isLocal = !chain && !tags.brand;
     const gem = isLocal && profile.value >= 80;
     const proximity = 1 - distance / Math.max(radiusMi, 1);
+    const confirmed = lastConfirmedYear(tags, el);
+    const stale = confirmed !== null && new Date().getFullYear() - confirmed >= STALE_YEARS;
     const score = Math.round(
-      0.45 * source.value + 0.4 * meals[0].value + 0.15 * proximity * 100 + (gem ? 3 : 0));
+      0.45 * source.value + 0.4 * meals[0].value + 0.15 * proximity * 100 + (gem ? 3 : 0) - (stale ? 10 : 0));
 
     const addr = [[tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" "), tags["addr:city"]]
       .filter(Boolean).join(", ");
@@ -341,6 +452,11 @@
       phone: tags.phone || tags["contact:phone"] || "",
       hours: tags.opening_hours || "",
       takeaway: tags.takeaway === "yes" || tags.takeaway === "only",
+      happyHour: happyHourFor(tags, chain),
+      deals: chain ? (chain.deals || []) : (CUISINE_DEALS[profileKey] || []),
+      dealsKnown: !!chain,
+      confirmed, stale,
+      osmUrl: `https://www.openstreetmap.org/${el.type}/${el.id}`,
     };
   }
 
@@ -350,6 +466,7 @@
     let list = state.places;
     if (state.cuisine !== "all") list = list.filter((p) => p.profileKey === state.cuisine);
     if (els.localOnly.checked) list = list.filter((p) => p.isLocal);
+    if (els.hhOnly.checked) list = list.filter((p) => p.happyHour);
     const sort = els.sort.value;
     const cmp = {
       score: (a, b) => b.score - a.score || a.distance - b.distance,
@@ -361,6 +478,9 @@
 
   function renderStatus() {
     const n = state.places.length;
+    const nHidden = state.allPlaces.length - n;
+    const hiddenNote = nHidden
+      ? ` <button type="button" class="link-btn" id="unhide-btn">Show ${nHidden} spot${nHidden > 1 ? "s" : ""} you marked closed</button>` : "";
     const ringNote = state.searchedMi < +els.radius.value
       ? ` (lots of food nearby — showing the closest spots out to <strong>${state.searchedMi} mi</strong>)`
       : ` within <strong>${state.searchedMi} mi</strong>`;
@@ -368,6 +488,7 @@
     els.status.innerHTML = n
       ? `Found <strong>${n}</strong> spots with meals in your <strong>${money(+els.min.value)}–${money(+els.max.value)}</strong> range near <strong>${esc(state.origin.label)}</strong>${ringNote}.`
       : `No spots with meals in that range near <strong>${esc(state.origin.label)}</strong>. Try raising your max price or widening the distance.`;
+    els.status.innerHTML += hiddenNote;
   }
 
   function renderRail() {
@@ -406,6 +527,25 @@
     }).join("") : `<div class="empty">No meals in this price range yet — try bumping up your max.</div>`;
   }
 
+  const HH_ORDER = { now: 0, soon: 1, later: 2, unknown: 3 };
+  let hhShown = 8;
+
+  function renderHappyHour() {
+    const list = state.places
+      .filter((p) => p.happyHour)
+      .map((p) => ({ p, st: happyHourStatus(p.happyHour) }))
+      .sort((a, b) => HH_ORDER[a.st.state] - HH_ORDER[b.st.state] || a.p.distance - b.p.distance);
+    els.hhList.innerHTML = list.length ? list.slice(0, hhShown).map(({ p, st }) => `
+      <button class="hh-card ${st.state === "now" ? "is-now" : ""}" data-id="${esc(p.id)}" type="button">
+        <span class="hh-when">${st.state === "now" ? "🟢 " : "🕒 "}${esc(st.label)}</span>
+        <span class="hh-name">${p.emoji} ${esc(p.name)}</span>
+        <span class="hh-what">${esc(p.happyHour.what)}</span>
+        <span class="hh-foot">${p.distance.toFixed(1)} mi · ${p.happyHour.listed ? "Listed by the restaurant on OpenStreetMap" : "Typical for this chain — varies by location"}</span>
+      </button>`).join("")
+      : `<div class="empty">No happy hours listed near you yet. Lots of local bars &amp; grills run one on weekdays around 3–6pm, so it's worth calling and asking.</div>`;
+    els.hhMore.hidden = list.length <= hhShown;
+  }
+
   function renderChips() {
     const counts = {};
     for (const p of state.places) counts[p.profileKey] = (counts[p.profileKey] || 0) + 1;
@@ -424,11 +564,16 @@
       return `<li><span>${esc(m.name)}</span><span class="dots"></span><span class="p">${priceText(m)}${per}</span></li>`;
     }).join("");
     const badges = [
+      p.stale ? `<span class="badge stale" title="Nobody has updated this listing in a while">⚠️ Not confirmed since ${p.confirmed} — call ahead</span>` : "",
       p.gem ? `<span class="badge gem">⭐ Local gem</span>` : "",
       p.chain ? `<span class="badge chain">Known deals</span>` : "",
       p.takeaway ? `<span class="badge">Takeout</span>` : "",
       p.meals.some((m) => m.serves > 1) ? `<span class="badge">Feeds a crew</span>` : "",
+      p.happyHour ? `<span class="badge hh ${happyHourStatus(p.happyHour).state === "now" ? "is-now" : ""}">🍻 ${happyHourStatus(p.happyHour).state === "now" ? "Happy hour now" : "Happy hour"}</span>` : "",
     ].join("");
+    const hh = p.happyHour
+      ? `<li class="deal-hh">🍻 <strong>Happy hour:</strong> ${esc(p.happyHour.rules ? describeHours(p.happyHour.rules) : p.happyHour.when)} — ${esc(p.happyHour.what)}${p.happyHour.listed ? "" : " <small>(typical)</small>"}</li>` : "";
+    const deals = hh + p.deals.map((d) => `<li>🏷️ ${p.dealsKnown ? "" : "Ask about: "}${esc(d)}</li>`).join("");
     const q = encodeURIComponent(`${p.name} ${p.addr || ""}`.trim());
     const links = [
       `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📸 Reviews & photos</a>`,
@@ -436,6 +581,7 @@
       p.menu ? `<a href="${esc(p.menu)}" target="_blank" rel="noopener">📜 Menu</a>` : "",
       p.website ? `<a href="${esc(p.website)}" target="_blank" rel="noopener">🌐 Website</a>` : "",
       p.phone ? `<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">📞 Call</a>` : "",
+      `<button type="button" class="link-btn closed-btn" data-close="${esc(p.id)}">🚫 Closed?</button>`,
     ].join("");
     return `<li class="spot" id="spot-${esc(p.id.replace("/", "-"))}" data-id="${esc(p.id)}">
       <div class="spot-emoji" aria-hidden="true">${p.emoji}</div>
@@ -445,12 +591,13 @@
         <div class="meter-label">Bang/Buck</div>
         <div class="meter-bar"><span style="width:${p.score}%"></span></div>
       </div>
-      <div>
+      <div class="spot-info">
         <div class="spot-meta"><span>${esc(p.cuisineLabel)}</span><span>· ${p.distance.toFixed(1)} mi</span>${p.addr ? `<span>· ${esc(p.addr)}</span>` : ""}</div>
         ${p.hours ? `<div class="spot-meta">🕒 ${esc(p.hours)}</div>` : ""}
         <div class="badges">${badges}</div>
       </div>
       <ul class="spot-meals">${meals}</ul>
+      ${deals ? `<ul class="spot-deals">${deals}</ul>` : ""}
       <div class="spot-links">${links}</div>
     </li>`;
   }
@@ -517,6 +664,8 @@
   function renderAll() {
     renderStatus();
     renderRail();
+    hhShown = 8;
+    renderHappyHour();
     renderChips();
     renderList();
   }
@@ -560,7 +709,8 @@
         const k = p.name.toLowerCase() + "|" + p.lat.toFixed(3) + "|" + p.lon.toFixed(3);
         if (!byKey.has(k)) byKey.set(k, p);
       }
-      state.places = [...byKey.values()];
+      state.allPlaces = [...byKey.values()];
+      state.places = state.allPlaces.filter((p) => !hidden.has(p.id));
       state.searchedMi = searched;
       state.cuisine = "all";
       state.shown = PAGE_SIZE;
@@ -572,7 +722,7 @@
       els.results.hidden = false;
       els.status.className = "status-bar is-error";
       els.status.innerHTML = `<strong>Uh-oh, kitchen trouble:</strong> ${esc(err.name === "AbortError" ? "The request timed out. Please try again." : err.message)}`;
-      els.rail.innerHTML = ""; els.list.innerHTML = ""; els.chips.innerHTML = "";
+      els.rail.innerHTML = ""; els.list.innerHTML = ""; els.chips.innerHTML = ""; els.hhList.innerHTML = "";
       els.status.scrollIntoView({ behavior: "smooth" });
     } finally {
       setLoading(false);
@@ -618,9 +768,44 @@
   });
   els.sort.addEventListener("change", () => { state.shown = PAGE_SIZE; renderList(); });
   els.localOnly.addEventListener("change", () => { state.shown = PAGE_SIZE; renderList(); });
+  els.hhOnly.addEventListener("change", () => { state.shown = PAGE_SIZE; renderList(); });
+  els.hhMore.addEventListener("click", () => { hhShown += 8; renderHappyHour(); });
+  els.hhList.addEventListener("click", (e) => {
+    const b = e.target.closest(".hh-card");
+    if (!b) return;
+    state.cuisine = "all"; els.localOnly.checked = false;
+    const idx = visiblePlaces().findIndex((p) => p.id === b.dataset.id);
+    if (idx >= state.shown) state.shown = idx + 1;
+    renderChips(); renderList();
+    highlight(b.dataset.id);
+  });
   els.more.addEventListener("click", () => { state.shown += PAGE_SIZE; renderList(); });
 
-  els.list.addEventListener("click", (e) => { const b = e.target.closest("[data-fly]"); if (b) highlight(b.dataset.fly); });
+  els.list.addEventListener("click", (e) => {
+    const fly = e.target.closest("[data-fly]");
+    if (fly) return highlight(fly.dataset.fly);
+    const close = e.target.closest("[data-close]");
+    if (close) markClosed(close.dataset.close);
+  });
+
+  function markClosed(id) {
+    const p = state.places.find((x) => x.id === id);
+    if (!p) return;
+    hidden.add(id); saveHidden(hidden);
+    state.places = state.places.filter((x) => x.id !== id);
+    renderAll();
+    els.status.insertAdjacentHTML("beforeend", `<div class="status-note">🚫 Hid <strong>${esc(p.name)}</strong> on this device.
+      Help everyone else: <a href="${esc(p.osmUrl)}" target="_blank" rel="noopener">open it on OpenStreetMap</a> and tap <em>Add a note</em> to say it closed.</div>`);
+    els.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  els.status.addEventListener("click", (e) => {
+    if (!e.target.closest("#unhide-btn")) return;
+    for (const p of state.allPlaces) hidden.delete(p.id);
+    saveHidden(hidden);
+    state.places = [...state.allPlaces];
+    renderAll();
+  });
   els.rail.addEventListener("click", (e) => {
     const b = e.target.closest(".meal-card");
     if (!b) return;

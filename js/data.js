@@ -10,6 +10,11 @@
  *   fill   – 1 (snack) .. 5 (you won't need dinner)
  *   serves – people it feeds (default 1); price is divided per person
  *   deal   – optional short note about why it's a deal
+ *
+ * Chains can also have:
+ *   happyHour – { when, what } where `when` uses OpenStreetMap opening_hours
+ *               style, e.g. "Mo-Fr 15:00-18:00" (typical; varies by location)
+ *   deals     – recurring deals worth knowing about
  */
 
 const CUISINE_PROFILES = {
@@ -228,6 +233,14 @@ const CUISINE_PROFILES = {
     label: "Sweets & Snacks", emoji: "🍩", value: 30,
     meals: [{ name: "Treat / snack", price: [3, 7], fill: 1 }],
   },
+  bar: {
+    label: "Bar & Grill", emoji: "🍻", value: 50,
+    meals: [
+      { name: "Happy hour bites", price: [5, 10], fill: 2, deal: "Usually weekdays, late afternoon" },
+      { name: "Pub burger & fries", price: [13, 17], fill: 4 },
+      { name: "Wings (10)", price: [12, 16], fill: 3 },
+    ],
+  },
   american: {
     label: "American", emoji: "🍽️", value: 55,
     meals: [
@@ -294,6 +307,7 @@ const NAME_KEYWORDS = [
   [/diner|pancake|waffle|breakfast|griddle/i, "diner"],
   [/noodle|asian/i, "noodle"],
   [/seafood|crab|fish|oyster|shrimp/i, "seafood"],
+  [/\bpub\b|tavern|brewery|brewing|taproom|saloon|sports bar|bar & grill|bar and grill/i, "bar"],
   [/steak/i, "steak"],
   [/donut|doughnut|ice cream|creamery|yogurt|bakery|boba|coffee|cafe|caf[eé]/i, "dessert"],
 ];
@@ -308,39 +322,39 @@ const CHAINS = [
     { name: "Pizza slice", price: [1.99, 1.99], fill: 3 },
     { name: "Whole 18\" pizza", price: [9.95, 9.95], fill: 5, serves: 4, deal: "Legendary value" },
   ]},
-  { match: /little caesars/i, name: "Little Caesars", emoji: "🍕", value: 95, meals: [
+  { match: /little caesars/i, deals: ["Hot-N-Ready pizzas, no waiting"],  name: "Little Caesars", emoji: "🍕", value: 95, meals: [
     { name: "Hot-N-Ready large pepperoni", price: [6, 8], fill: 5, serves: 3, deal: "Ready-to-go, no wait" },
     { name: "Crazy Combo (Crazy Bread + sauce)", price: [4, 5], fill: 2 },
   ]},
-  { match: /taco bell/i, name: "Taco Bell", emoji: "🌮", value: 90, meals: [
+  { match: /taco bell/i, deals: ["Cravings Value Menu all day", "App-only deals and rewards"],  name: "Taco Bell", emoji: "🌮", value: 90, meals: [
     { name: "Cravings Value Menu items", price: [1.5, 3], fill: 2 },
     { name: "Luxe Cravings Box", price: [7, 9], fill: 5, deal: "4 items + drink" },
     { name: "Cheesy Gordita Crunch", price: [4, 5.5], fill: 3 },
   ]},
-  { match: /mcdonald/i, name: "McDonald's", emoji: "🍟", value: 82, meals: [
+  { match: /mcdonald/i, deals: ["$5 Meal Deal", "Weekly deals in the McDonald's app"],  name: "McDonald's", emoji: "🍟", value: 82, meals: [
     { name: "$5 Meal Deal (McDouble/McChicken, 4pc nugs, fries, drink)", price: [5, 6.5], fill: 4, deal: "Check the app for extra deals" },
     { name: "McDouble", price: [2.5, 3.5], fill: 2 },
   ]},
-  { match: /wendy/i, name: "Wendy's", emoji: "🍔", value: 84, meals: [
+  { match: /wendy/i, deals: ["Biggie Bag", "App coupons (often BOGO or $1 items)"],  name: "Wendy's", emoji: "🍔", value: 84, meals: [
     { name: "Biggie Bag", price: [5, 7], fill: 4, deal: "Burger, nuggets, fries & drink" },
     { name: "4 for $4 / value meal", price: [4, 5], fill: 3 },
   ]},
-  { match: /burger king/i, name: "Burger King", emoji: "🍔", value: 80, meals: [
+  { match: /burger king/i, deals: ["$5 Your Way Meal", "Royal Perks app coupons"],  name: "Burger King", emoji: "🍔", value: 80, meals: [
     { name: "$5 Your Way Meal", price: [5, 6], fill: 4 },
     { name: "Whopper combo", price: [9, 11], fill: 4 },
   ]},
-  { match: /chipotle/i, name: "Chipotle", emoji: "🌯", value: 78, meals: [
+  { match: /chipotle/i, deals: ["Rewards app freebies & BOGO promos"],  name: "Chipotle", emoji: "🌯", value: 78, meals: [
     { name: "Burrito bowl (double the rice & beans)", price: [9, 12], fill: 5, deal: "Free toppings = huge bowl" },
   ]},
   { match: /qdoba/i, name: "Qdoba", emoji: "🌯", value: 77, meals: [
     { name: "Burrito (queso & guac included)", price: [10, 13], fill: 5 },
   ]},
-  { match: /panda express/i, name: "Panda Express", emoji: "🥡", value: 78, meals: [
+  { match: /panda express/i, deals: ["Family meal feeds 4"],  name: "Panda Express", emoji: "🥡", value: 78, meals: [
     { name: "Plate (2 entrées + side)", price: [10, 12], fill: 5 },
     { name: "Bowl (1 entrée + side)", price: [8.5, 10], fill: 4 },
     { name: "Family meal", price: [38, 45], fill: 5, serves: 4 },
   ]},
-  { match: /subway/i, name: "Subway", emoji: "🥪", value: 76, meals: [
+  { match: /subway/i, deals: ["Footlong deals in the app"],  name: "Subway", emoji: "🥪", value: 76, meals: [
     { name: "Footlong deal", price: [7, 10], fill: 5, deal: "Watch the app for footlong promos" },
     { name: "6-inch sub", price: [5, 7], fill: 3 },
   ]},
@@ -363,11 +377,11 @@ const CHAINS = [
     { name: "All-Star Special", price: [10, 13], fill: 5, deal: "Waffle, eggs, meat, hashbrowns & toast" },
     { name: "Hashbrowns scattered, smothered & covered", price: [4, 6], fill: 3 },
   ]},
-  { match: /popeyes/i, name: "Popeyes", emoji: "🍗", value: 80, meals: [
+  { match: /popeyes/i, deals: ["Weekly app-only deals"],  name: "Popeyes", emoji: "🍗", value: 80, meals: [
     { name: "Chicken sandwich combo", price: [8, 10], fill: 4 },
     { name: "2pc chicken combo", price: [8, 10], fill: 4 },
   ]},
-  { match: /\bkfc\b|kentucky fried/i, name: "KFC", emoji: "🍗", value: 78, meals: [
+  { match: /\bkfc\b|kentucky fried/i, deals: ["Fill Up boxes", "Weekly app deals"],  name: "KFC", emoji: "🍗", value: 78, meals: [
     { name: "Fill Up box", price: [7, 9], fill: 4 },
     { name: "8pc bucket meal", price: [28, 35], fill: 5, serves: 4 },
   ]},
@@ -381,22 +395,22 @@ const CHAINS = [
   { match: /bojangles/i, name: "Bojangles", emoji: "🍗", value: 78, meals: [{ name: "Bo's combo", price: [8, 10], fill: 4 }] },
   { match: /zaxby/i, name: "Zaxby's", emoji: "🍗", value: 70, meals: [{ name: "Chicken finger plate", price: [10, 13], fill: 5 }] },
   { match: /wingstop/i, name: "Wingstop", emoji: "🍗", value: 64, meals: [{ name: "Boneless wing combo", price: [10, 13], fill: 4 }] },
-  { match: /domino/i, name: "Domino's", emoji: "🍕", value: 90, meals: [
+  { match: /domino/i, deals: ["Mix & Match deal", "Carryout specials"],  name: "Domino's", emoji: "🍕", value: 90, meals: [
     { name: "Mix & Match deal (2+ items)", price: [6.99, 7.99], fill: 4, deal: "Each item; order 2 or more" },
     { name: "Carryout large 3-topping", price: [9.99, 11.99], fill: 5, serves: 3 },
   ]},
-  { match: /pizza hut/i, name: "Pizza Hut", emoji: "🍕", value: 84, meals: [
+  { match: /pizza hut/i, deals: ["Deal Lover's menu", "Big Dinner Box"],  name: "Pizza Hut", emoji: "🍕", value: 84, meals: [
     { name: "Deal Lover's menu item", price: [7, 9], fill: 4 },
     { name: "Big Dinner Box", price: [25, 30], fill: 5, serves: 4 },
   ]},
-  { match: /papa john/i, name: "Papa John's", emoji: "🍕", value: 84, meals: [
+  { match: /papa john/i, deals: ["Papa Pairings", "Promo codes in the app"],  name: "Papa John's", emoji: "🍕", value: 84, meals: [
     { name: "Papa Pairings (2+ items)", price: [6.99, 7.99], fill: 4 },
     { name: "Large 1-topping", price: [12, 15], fill: 5, serves: 3 },
   ]},
   { match: /papa murphy/i, name: "Papa Murphy's", emoji: "🍕", value: 82, meals: [
     { name: "Take 'N' Bake large", price: [11, 15], fill: 5, serves: 3 },
   ]},
-  { match: /jack in the box/i, name: "Jack in the Box", emoji: "🍔", value: 82, meals: [
+  { match: /jack in the box/i, deals: ["2 tacos for cheap, all day", "Late-night Munchie Meals"],  name: "Jack in the Box", emoji: "🍔", value: 82, meals: [
     { name: "2 tacos", price: [1.99, 2.5], fill: 2, deal: "Late-night classic" },
     { name: "Jack's value combo", price: [5, 7], fill: 4 },
   ]},
@@ -410,14 +424,14 @@ const CHAINS = [
   ]},
   { match: /whataburger/i, name: "Whataburger", emoji: "🍔", value: 72, meals: [{ name: "Whataburger combo", price: [9, 11], fill: 5 }] },
   { match: /culver/i, name: "Culver's", emoji: "🍔", value: 72, meals: [{ name: "ButterBurger value basket", price: [9, 11], fill: 4 }] },
-  { match: /sonic/i, name: "Sonic Drive-In", emoji: "🌭", value: 78, meals: [
+  { match: /sonic/i, happyHour: { when: "Mo-Su 14:00-16:00", what: "Half-price drinks & slushes" }, deals: ["App-only deals"],  name: "Sonic Drive-In", emoji: "🌭", value: 78, meals: [
     { name: "Corn dog", price: [1.5, 2.5], fill: 2 },
     { name: "Combo meal", price: [8, 10], fill: 4 },
   ]},
   { match: /white castle/i, name: "White Castle", emoji: "🍔", value: 80, meals: [
     { name: "4 sliders + fries", price: [8, 10], fill: 4 },
   ]},
-  { match: /dairy queen|\bdq\b/i, name: "Dairy Queen", emoji: "🍦", value: 78, meals: [
+  { match: /dairy queen|\bdq\b/i, deals: ["$7 Meal Deal"],  name: "Dairy Queen", emoji: "🍦", value: 78, meals: [
     { name: "$7 Meal Deal (burger, fries, drink, sundae)", price: [7, 8], fill: 4, deal: "Comes with dessert" },
   ]},
   { match: /arby/i, name: "Arby's", emoji: "🥪", value: 72, meals: [{ name: "2 for deal sandwiches", price: [7, 9], fill: 4 }] },
@@ -430,7 +444,7 @@ const CHAINS = [
   { match: /cicis|cici'?s/i, name: "Cicis Pizza", emoji: "🍕", value: 90, meals: [
     { name: "Pizza buffet", price: [8, 11], fill: 5, deal: "All-you-can-eat pizza" },
   ]},
-  { match: /denny'?s/i, name: "Denny's", emoji: "🥞", value: 74, meals: [
+  { match: /denny'?s/i, deals: ["Value menu all day"],  name: "Denny's", emoji: "🥞", value: 74, meals: [
     { name: "Value Slam", price: [7, 9], fill: 4 },
     { name: "Grand Slam", price: [10, 13], fill: 5 },
   ]},
@@ -440,8 +454,56 @@ const CHAINS = [
     { name: "Swedish meatballs plate", price: [6, 8], fill: 4, deal: "Cheap & surprisingly good" },
     { name: "Hot dog", price: [1, 1.5], fill: 2 },
   ]},
-  { match: /california pizza kitchen|\bcpk\b/i, name: "California Pizza Kitchen", emoji: "🍕", value: 45, meals: [
+  { match: /california pizza kitchen|\bcpk\b/i, happyHour: { when: "Mo-Fr 15:00-18:00", what: "Discounted small plates, pizzas & drinks" },  name: "California Pizza Kitchen", emoji: "🍕", value: 45, meals: [
     { name: "Hand-tossed pizza", price: [17, 22], fill: 4 },
+  ]},
+  { match: /bj'?s restaurant|bj'?s brewhouse/i, name: "BJ's Restaurant & Brewhouse", emoji: "🍻", value: 58,
+    happyHour: { when: "Mo-Fr 15:00-19:00", what: "Discounted appetizers, mini pizzas & drinks" }, meals: [
+    { name: "Happy hour appetizer", price: [6, 9], fill: 2 },
+    { name: "Lunch special", price: [12, 15], fill: 4 },
+  ]},
+  { match: /cheesecake factory/i, name: "The Cheesecake Factory", emoji: "🍰", value: 55,
+    happyHour: { when: "Mo-Fr 16:00-18:00", what: "Discounted appetizers & drinks" }, meals: [
+    { name: "Happy hour appetizer", price: [7, 9], fill: 3 },
+    { name: "Lunch special (huge portion)", price: [15, 19], fill: 5, deal: "Easily two meals" },
+  ]},
+  { match: /yard house/i, name: "Yard House", emoji: "🍻", value: 52,
+    happyHour: { when: "Mo-Fr 15:00-18:00; Su-We 22:00-24:00", what: "Half-off appetizers & pizzas, drink specials" }, meals: [
+    { name: "Happy hour appetizer", price: [6, 10], fill: 2 },
+  ]},
+  { match: /outback/i, name: "Outback Steakhouse", emoji: "🥩", value: 52,
+    happyHour: { when: "Mo-Fr 15:00-18:00", what: "Aussie Hour: drink & appetizer specials" }, meals: [
+    { name: "Aussie Hour appetizer", price: [6, 9], fill: 2 },
+    { name: "Lunch sirloin combo", price: [15, 19], fill: 4 },
+  ]},
+  { match: /chuy'?s/i, name: "Chuy's", emoji: "🌮", value: 74,
+    happyHour: { when: "Mo-Fr 16:00-19:00", what: "Drink specials + free nacho bar" }, meals: [
+    { name: "Free happy hour nacho bar (with a drink)", price: [5, 8], fill: 3, deal: "Free chips, queso & salsa bar" },
+    { name: "Burrito plate", price: [12, 15], fill: 5 },
+  ]},
+  { match: /applebee/i, name: "Applebee's", emoji: "🍻", value: 62,
+    happyHour: { when: "Mo-Su 15:00-18:00; Mo-Su 21:00-24:00", what: "Drink specials & late-night half-price apps (many locations)" },
+    deals: ["All You Can Eat deals (runs some seasons)"], meals: [
+    { name: "Half-price appetizer (late night)", price: [5, 8], fill: 2 },
+    { name: "2 for $25 (share it)", price: [25, 27], fill: 5, serves: 2 },
+  ]},
+  { match: /chili'?s/i, name: "Chili's", emoji: "🌶️", value: 70,
+    deals: ["3 for Me value menu (drink, app/side, entrée)"], meals: [
+    { name: "3 for Me combo", price: [10.99, 13], fill: 5, deal: "Drink + starter + entrée" },
+  ]},
+  { match: /buffalo wild wings|\bbww\b/i, name: "Buffalo Wild Wings", emoji: "🍗", value: 56,
+    happyHour: { when: "Mo-Fr 15:00-18:00", what: "Drink & appetizer specials (varies by location)" },
+    deals: ["Weekly wing deals (check the app)"], meals: [
+    { name: "Boneless wings (10)", price: [13, 17], fill: 4 },
+  ]},
+  { match: /tgi friday|\bfridays\b/i, name: "TGI Fridays", emoji: "🍻", value: 56,
+    happyHour: { when: "Mo-Fr 15:00-18:00", what: "Drink specials & discounted appetizers" }, meals: [
+    { name: "Happy hour appetizer", price: [6, 9], fill: 2 },
+  ]},
+  { match: /red robin/i, name: "Red Robin", emoji: "🍔", value: 62,
+    happyHour: { when: "Mo-Fr 15:00-18:00", what: "Drink & appetizer specials" },
+    deals: ["Bottomless steak fries with burgers"], meals: [
+    { name: "Burger with bottomless fries", price: [13, 17], fill: 5, deal: "Fries are unlimited" },
   ]},
   { match: /panera/i, name: "Panera Bread", emoji: "🥖", value: 52, meals: [{ name: "You Pick Two", price: [11, 14], fill: 4 }] },
   { match: /noodles & company|noodles and company/i, name: "Noodles & Company", emoji: "🍜", value: 62, meals: [{ name: "Regular noodle bowl", price: [9, 12], fill: 4 }] },
@@ -458,3 +520,30 @@ const DAY_TIPS = [
   "🐟 Friday: fish-fry Fridays and happy hour food menus are your friends.",
   "🥞 Saturday: big breakfast is the best-value meal of the weekend. Diners FTW.",
 ];
+
+/* Deals that are common for each kind of place (ask when you go). */
+const CUISINE_DEALS = {
+  mexican: ["Taco Tuesday specials", "Lunch combo plates"],
+  vietnamese: ["Lunch-size phở at a lower price"],
+  chinese: ["Weekday lunch specials (usually 11am–3pm)"],
+  thai: ["Weekday lunch specials"],
+  indian: ["Lunch buffet is cheaper than dinner"],
+  pizza: ["Slice + drink combos", "2-pizza or carryout deals"],
+  burger: ["Combo upgrades are usually the best value"],
+  sandwich: ["Ask about the sub of the day"],
+  chicken: ["Family meals are the cheapest per person"],
+  bbq: ["Lunch plates are cheaper than dinner"],
+  korean: ["Lunch specials for AYCE BBQ"],
+  japanese: ["Bento lunch specials", "Happy hour sushi & ramen deals"],
+  sushi: ["Happy hour rolls (often half off)"],
+  mediterranean: ["Platters are big enough to share"],
+  latin: ["Daily lunch plates"],
+  diner: ["Early-bird & breakfast specials"],
+  soul: ["Daily meat + sides special"],
+  buffet: ["Lunch buffet is cheaper than dinner", "Senior & kid pricing"],
+  italian: ["Lunch-size pasta specials"],
+  seafood: ["Happy hour oysters & apps", "Fish fry Fridays"],
+  steak: ["Lunch steak specials"],
+  bar: ["Happy hour food & drinks (usually weekdays 3–6pm)", "Weekly wing, taco or trivia-night specials"],
+  american: ["Happy hour appetizers (usually weekdays 3–6pm)"],
+};
